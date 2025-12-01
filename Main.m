@@ -33,6 +33,7 @@ recordsDir = sprintf('records%d', fsTarget);   % "records500", "records100", ...
 inRootRel  = fullfile(ptbRoot, recordsDir);    % relative to project root
 
 % Output base folder: <output_folder>/ptb-xl-csv/recordsXXX
+% (flat: everything directly inside recordsXXX)
 outBaseRel = fullfile(outRoot, 'ptb-xl-csv', recordsDir);
 
 % Work with absolute paths for I/O
@@ -44,6 +45,11 @@ fprintf('Output root: %s\n', outBaseAbs);
 
 if ~exist(inRootAbs, 'dir')
     error('Input directory does not exist: %s', inRootAbs);
+end
+
+% Ensure flat output directory exists
+if ~exist(outBaseAbs, 'dir')
+    mkdir(outBaseAbs);
 end
 
 % Find all WFDB header files recursively (requires R2016b+ for "**")
@@ -58,7 +64,7 @@ for k = 1:numel(heaFiles)
     heaName   = heaFiles(k).name;            % e.g. "00001_hr.hea"
     [~, recName, ~] = fileparts(heaName);    % "00001_hr"
 
-    %% --- Build relative folder structure under inRootAbs (for mirroring) ---
+    %% --- Build relative folder structure under inRootAbs (only for reading) ---
     if startsWith(heaFolder, inRootAbs)
         relFolder = heaFolder(numel(inRootAbs)+1:end);   % strip root prefix
     else
@@ -72,8 +78,9 @@ for k = 1:numel(heaFiles)
         relFolder = relFolder(2:end);
     end
 
-    %% --- Output path (absolute) ---
-    outDirAbs = fullfile(outBaseAbs, relFolder);
+    %% --- Output path (FLAT) ---
+    % All CSVs go directly into outBaseAbs/recordsXXX, no subfolders.
+    outDirAbs = outBaseAbs;
     outFile   = fullfile(outDirAbs, [recName '.csv']);
 
     % If CSV already exists, skip
@@ -83,14 +90,13 @@ for k = 1:numel(heaFiles)
         continue;
     end
 
-    % Ensure output directory exists
-    if ~exist(outDirAbs, 'dir')
-        mkdir(outDirAbs);
-    end
-
     %% --- Record path for rdsamp (RELATIVE, as WFDB expects) ---
     % inRootRel is like ".local\ptb-xl\records500"
-    recPathNoExt = fullfile(inRootRel, relFolder, recName);
+    if isempty(relFolder)
+        recPathNoExt = fullfile(inRootRel, recName);
+    else
+        recPathNoExt = fullfile(inRootRel, relFolder, recName);
+    end
 
     fprintf('[%5d/%5d] Processing: %s -> %s\n', ...
         k, numel(heaFiles), recPathNoExt, outFile);
