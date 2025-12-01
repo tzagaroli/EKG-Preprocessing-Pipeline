@@ -1,52 +1,151 @@
-%% Test reading WFDB record from PTB-XL database
-fprintf('\n=== Testing WFDB Record Reading ===\n');
+clear
+close all
 
-% Base PTB-XL folder from config.yaml
-ptbRoot = config.data.raw_physionet;   % ".local\ptb-xl"
 
-% Choose which record to read inside PTB-XL
-% (adjust these three if you want a different record)
-recordDbSubdir = 'records500';        % or 'records100', etc.
-patientFolder  = '00000';
-recordName     = '00001_hr';          % WFDB record name, no extension
+%% Loading required tools
 
-% Build full record path (without .hea/.dat) for rdsamp
-recordPath = fullfile(ptbRoot, recordDbSubdir, patientFolder, recordName);
+% Used to read a config file
+addpath(genpath('third_party/yamlmatlab/yaml'));
 
-fprintf('Using record path: %s\n', recordPath);
+% Used to perform delination on ECG
+addpath(genpath('third_party/ECGdeli/Filtering'));
+addpath(genpath('third_party/ECGdeli/ECG_Processing'));
 
-try
-    % Read the WFDB record
-    [signal, Fs, tm] = rdsamp(recordPath);
+% Custom functions path
+addpath('functions\')
 
-    fprintf('Successfully read WFDB record: %s\n', recordPath);
-    fprintf('Signal dimensions: %d samples x %d leads\n', size(signal, 1), size(signal, 2));
-    fprintf('Sampling frequency (file): %d Hz\n', Fs);
-    fprintf('Duration: %.2f seconds\n', size(signal, 1) / Fs);
 
-    % Optional: check against configured sampling frequency
-    if isfield(config, 'signal') && isfield(config.signal, 'sample_frequency')
-        cfgFs = config.signal.sample_frequency;
-        fprintf('Sampling frequency (config): %d Hz\n', cfgFs);
-        if ~isempty(cfgFs) && Fs ~= cfgFs
-            warning('Sampling frequency in file (%g Hz) differs from config (%g Hz).', Fs, cfgFs);
-        end
-    end
+%% Loading config
+config = ReadYaml('config.yaml');
 
-    % Display first 5 samples of first lead
-    fprintf('\nFirst 5 samples of Lead I:\n');
-    disp(signal(1:5, 1));
 
-    % Plot the first lead
-    figure;
-    plot(tm, signal(:, 1));
-    xlabel('Time (seconds)');
-    ylabel('Amplitude (mV)');
-    title(sprintf('ECG Signal - Lead I (%s)', recordName));
-    grid on;
+%% Export PTB-XL records to CSV based on config.signal.sample_frequency
 
-catch ME
-    fprintf('Error reading WFDB record "%s": %s\n', recordPath, ME.message);
+fprintf('\n=== Exporting PTB-XL records to CSV ===\n');
+
+% From config
+fsTarget   = config.signal.sample_frequency;   % e.g. 500
+ptbRoot    = config.data.raw_physionet;        % e.g. ".local\ptb-xl"
+outRoot    = config.data.output_folder;        % e.g. ".local\output"
+
+% Choose recordsXXX directory based on sampling frequency
+recordsDir = sprintf('records%d', fsTarget);   % "records500", "records100", ...
+inRootRel  = fullfile(ptbRoot, recordsDir);    % relative to project root
+
+% Output base folder: <output_folder>/ptb-xl-csv/recordsXXX
+outBaseRel = fullfile(outRoot, 'ptb-xl-csv', recordsDir);
+
+% Work with absolute paths for I/O
+inRootAbs  = fullfile(pwd, inRootRel);
+outBaseAbs = fullfile(pwd, outBaseRel);
+
+fprintf('Input root : %s\n', inRootAbs);
+fprintf('Output root: %s\n', outBaseAbs);
+
+if ~exist(inRootAbs, 'dir')
+    error('Input directory does not exist: %s', inRootAbs);
 end
 
-fprintf('\n');
+% Find all WFDB header files recursively (requires R2016b+ for "**")
+heaFiles = dir(fullfile(inRootAbs, '**', '*.hea'));
+fprintf('Found %d header files (.hea) under %s\n', numel(heaFiles), inRootAbs);
+
+numSkipped = 0;
+numWritten = 0;
+
+for k = 1:numel(heaFiles)
+    heaFolder = heaFiles(k).folder;          % absolute: ...\records500\00000
+    heaName   = heaFiles(k).name;            % e.g. "00001_hr.hea"
+    [~, recName, ~] = fileparts(heaName);    % "00001_hr"
+
+    %% --- Build relative folder structure under inRootAbs (for mirroring) ---
+    if startsWith(heaFolder, inRootAbs)
+        relFolder = heaFolder(numel(inRootAbs)+1:end);   % strip root prefix
+    else
+        warning('Folder "%s" is not under root "%s". Using no relative folder.', ...
+            heaFolder, inRootAbs);
+        relFolder = '';
+    end
+
+    % Remove leading file separator if present
+    if ~isempty(relFolder) && startsWith(relFolder, filesep)
+        relFolder = relFolder(2:end);
+    end
+
+    %% --- Output path (absolute) ---
+    outDirAbs = fullfile(outBaseAbs, relFolder);
+    outFile   = fullfile(outDirAbs, [recName '.csv']);
+
+    % If CSV already exists, skip
+    if exist(outFile, 'file')
+        numSkipped = numSkipped + 1;
+        fprintf('[%5d/%5d] Skipping existing: %s\n', k, numel(heaFiles), outFile);
+        continue;
+    end
+
+    % Ensure output directory exists
+    if ~exist(outDirAbs, 'dir')
+        mkdir(outDirAbs);
+    end
+
+    %% --- Record path for rdsamp (RELATIVE, as WFDB expects) ---
+    % inRootRel is like ".local\ptb-xl\records500"
+    recPathNoExt = fullfile(inRootRel, relFolder, recName);
+
+    fprintf('[%5d/%5d] Processing: %s -> %s\n', ...
+        k, numel(heaFiles), recPathNoExt, outFile);
+
+    % Optional: sanity check that the header file is reachable via this relative path
+    if ~exist([recPathNoExt '.hea'], 'file')
+        warning('Header file not found for record path (relative): %s', [recPathNoExt '.hea']);
+        continue;
+    end
+
+    try
+        %% Read WFDB record using the RELATIVE record path
+        [signal, Fs, ~] = rdsamp(recPathNoExt);
+
+        % Sanity check sampling frequency against config
+        if Fs ~= fsTarget
+            warning('Record %s has Fs=%g Hz (config expects %g Hz).', ...
+                recPathNoExt, Fs, fsTarget);
+        end
+
+        %% Build header names like LeadI;LeadII;...
+        nLeads = size(signal, 2);
+
+        % Standard 12-lead names if applicable
+        standardNames = { ...
+            'LeadI', 'LeadII', 'LeadIII', ...
+            'LeadaVR', 'LeadaVL', 'LeadaVF', ...
+            'LeadV1', 'LeadV2', 'LeadV3', 'LeadV4', 'LeadV5', 'LeadV6'};
+
+        if nLeads <= numel(standardNames)
+            varNames = standardNames(1:nLeads);
+        else
+            % More than 12 leads: pad with generic names
+            varNames = standardNames;
+            for j = (numel(standardNames)+1):nLeads
+                varNames{j} = sprintf('Lead%d', j);
+            end
+        end
+
+        %% Wrap into table so we can write header + data easily
+        T = array2table(signal, 'VariableNames', varNames);
+
+        %% Write CSV with semicolon delimiter
+        writetable(T, outFile, 'Delimiter', ';');
+
+        numWritten = numWritten + 1;
+
+    catch ME
+        warning('Error processing record %s: %s', recPathNoExt, ME.message);
+        continue;
+    end
+end
+
+fprintf('\nExport complete.\n');
+fprintf('Total header files: %d\n', numel(heaFiles));
+fprintf('Written CSV files : %d\n', numWritten);
+fprintf('Skipped (existing): %d\n', numSkipped);
+fprintf('CSV files are in  : %s\n\n', outBaseAbs);
