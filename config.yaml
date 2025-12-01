@@ -1,0 +1,7 @@
+signal:
+  sample_frequency: 500
+
+data:
+  raw_physionet: ".local\\ptb-xl"
+  raw_pcb_values: ".local\\raw_pcb"
+  output_folder: ".local\\output"
