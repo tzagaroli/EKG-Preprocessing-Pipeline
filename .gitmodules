@@ -1,3 +1,6 @@
 [submodule "third_party/ECGdeli"]
 	path = third_party/ECGdeli
 	url = https://github.com/tzagaroli/ECGdeli
+[submodule "third_party/yamlmatlab"]
+	path = third_party/yamlmatlab
+	url = https://github.com/tzagaroli/yamlmatlab
