@@ -2,6 +2,6 @@ signal:
   sample_frequency: 500
 
 data:
-  raw_physionet: ".local\\ptb-xl"
-  raw_pcb_values: ".local\\raw_pcb"
+  physionet_db: ".local\\ptb-xl"
+  ecg_pcb_values: ".local\\ecg-pcb-signals"
   output_folder: ".local\\output"
