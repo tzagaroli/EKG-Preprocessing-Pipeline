@@ -1,9 +1,6 @@
 clear
 close all
 
-tic
-
-
 %% Loading tools
 
 % Used to read a config file
@@ -16,73 +13,71 @@ addpath(genpath('third_party/ECGdeli/ECG_Processing'));
 % Custom functions path
 addpath('functions\')
 
-
 %% Load config
 config = ReadYaml('config.yaml');
 
+% Ask the user to select the action
+disp("===========================================================================")
+disp("                         EKG-Prepocessing-Pipeline                         ")
+disp("===========================================================================")
+disp("")
+disp("Select an action:");
+disp("  1) Build PhysioNet dataset");
+disp("  2) Build Platine ECG dataset");
+disp("  3) Build both datasets");
+disp("  0) Exit");
 
-%%
-
-fs = config.signal.sample_frequency;
-
-% Get path to physionet DB (with sample frequency)
-if fs == 500
-    physionet_db_path = fullfile(pwd, config.data.physionet_db, "records500/");
-elseif fs == 100
-    physionet_db_path = fullfile(pwd, config.data.physionet_db, "records100/");
-else
-    error("Config: sample frequency isn't supported.");
+% Read answer
+while true
+    % Input as string
+    choiceStr = input("Your choice: ", 's');
+    
+    % If string is empty -> Ask again
+    if isempty(choiceStr)
+        disp("Empty input. Try again.")
+        disp(" ")
+        continue
+    end
+    
+    % Convert string to double
+    choice = str2double(choiceStr);
+    
+    % If Not a Number -> Ask again
+    if isnan(choice)
+        disp("Please enter a number.")
+        continue
+    end
+    
+    % If outside of range -> Ask again
+    if ismember(choice,[0 1 2 3])
+        disp(" ")
+        break
+    else
+        disp("Invalid choice. Enter 0, 1, 2 or 3.")
+    end
 end
 
-if ~isfolder(physionet_db_path)
-    error("IO: Path to Physionet DB isn't correct.")
+% If choice "Exit" -> End the program
+if (choice == 0)
+    return
 end
 
+% Check for valid output path
 output_path = fullfile(pwd, config.data.output_folder, getTimestampYYMMDD_HHMM());
 if ~isfolder(output_path)
     mkdir(output_path);
 end
-physionetOutDir = fullfile(string(output_path), "ptb-xl");
-if ~isfolder(physionetOutDir)
-    mkdir(physionetOutDir);
+
+tic
+
+if (choice == 1)
+    Physionet(config, output_path)
+elseif(choice == 2)
+    EKG_Platine(config, output_path)
+else % choice == 3
+    Physionet(config, output_path)
+    EKG_Platine(config, output_path)
 end
-
-physionetRecords = getPhysionetRecords(physionet_db_path);
-% Read all records (no processing)
-oldPwd = pwd;
-cleanupObj = onCleanup(@() cd(oldPwd));
-
-cd(physionet_db_path);  % Ensure WFDB '.' search path points here
-
-physionetRecords(12691) = [];
-
-parfor k = 1:numel(physionetRecords)
-    rec = char(physionetRecords(k));   % WFDB record name, e.g. '00000\00001_hr'
-    try
-        [signal, Fs, tm] = rdsamp(rec);  % Read full record
-    catch ME
-        warning("WFDB:ReadFailed", "Failed to read %s (%s)", rec, ME.message);
-        continue
-    end
-
-    signal_filtered = ecgFilter(signal, Fs);
-    [FPT_MultiChannel,~]=Annotate_ECG_Multi(signal_filtered,Fs);
-
-    A = CreateOutputArray(signal, FPT_MultiChannel);
-    T = array2table(A, 'VariableNames', ...
-        ["I","II","III","AVR","AVL","AVF", ...
-        "V1","V2","V3","V4","V5","V6", ...
-        "P-wave","P-peak","QRS-complex","R-peak","T-wave","T-peak"] ...
-    );
-
-    % Save the table
-    outFile = fullfile(physionetOutDir, sprintf("%d.csv", k));
-
-    % Write CSV
-    writetable(T, outFile);
-end
-
-cd(oldPwd)
 
 elapsedTime = toc;
 fprintf("Total execution time: %.2f seconds\n", elapsedTime);
