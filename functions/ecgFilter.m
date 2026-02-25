@@ -5,14 +5,11 @@ function [signal] = ecgFilter(signal, Fs)
     [signal,~] = ECG_Baseline_Removal(signal,Fs,1,0.5);
 
     % filter noise frequencies
-    % frequencies are already optimized for ECG signals (literature values):
-    % Lowpass: 120 Hz, Highpass: 0.3 Hz, Bandstop (49-51 Hz)
-    [signal] = ECG_High_Low_Filter(signal,Fs,1,40);
+    [signal] = ECG_High_Low_Filter(signal,Fs,1,70);
     signal=Notch_Filter(signal,Fs,50,1);
 
     % isoline correction
     % usage: [filteredsignal,offset,frequency_matrix,bins_matrix]=Isoline_Correction(signal,varargin)
-    
     [signal,~,~,~]=Isoline_Correction(signal);
 end
 
