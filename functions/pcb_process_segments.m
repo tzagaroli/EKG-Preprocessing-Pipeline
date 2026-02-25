@@ -70,16 +70,3 @@ function pcb_process_segments(config, output_path)
 
     fprintf("PCB segments processed -> %s\n", pcbDir);
 end
-
-
-function values = readSecondColumnSemicolon_fast(fpath)
-    fid = fopen(fpath, "r");
-    if fid < 0
-        error("Failed to open %s", fpath);
-    end
-    cleaner = onCleanup(@() fclose(fid));
-
-    C = textscan(fid, "%*f%f", "Delimiter", ";", "CollectOutput", true);
-    values = C{1};
-    values = values(~isnan(values));
-end
